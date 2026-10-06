@@ -28,6 +28,23 @@ public sealed class ReviewServer(RunStore store, FrigateClient frigate, Func<Cla
         builder.Logging.ClearProviders();
         var app = builder.Build();
 
+        // Served under a subfolder behind a reverse proxy (e.g. https://host/frigate-labeler/):
+        // strip the prefix, and send the bare prefix to the trailing-slash URL the page's relative links need.
+        if (Environment.GetEnvironmentVariable("FRIGATE_LABELER_BASE_PATH") is { Length: > 1 } basePath)
+        {
+            basePath = "/" + basePath.Trim('/');
+            app.UsePathBase(basePath);
+            app.Use(async (ctx, next) =>
+            {
+                if (ctx.Request.PathBase.HasValue && !ctx.Request.Path.HasValue)
+                    ctx.Response.Redirect(ctx.Request.PathBase + "/");
+                else
+                    await next();
+            });
+            Console.WriteLine($"Base path: {basePath}");
+        }
+        app.UseRouting();   // after UsePathBase, so routes see the stripped path
+
         var index = Path.Combine(AppContext.BaseDirectory, "wwwroot", "index.html");
         app.MapGet("/", () => Results.File(index, "text/html; charset=utf-8"));
         app.MapGet("/healthz", () => "ok");

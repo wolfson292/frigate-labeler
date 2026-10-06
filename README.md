@@ -89,7 +89,8 @@ The `deploy/` folder has everything for a home server:
 
 - `docker-compose.yml`: the app with two named volumes, `/config` (Frigate+ sign-in, camera notes)
   and `/data` (images and results). It joins SWAG's Docker network and publishes no ports.
-- `frigate-labeler.subdomain.conf`: SWAG proxy config with Authelia enabled. **Keep authentication
+- `frigate-labeler.subfolder.conf`: SWAG proxy config serving `https://<domain>/frigate-labeler/`,
+  with Authelia enabled. **Keep authentication
   on:** the app has no login of its own, and anyone who can reach it can spend your Claude credit
   and change your Frigate+ labels.
 - `.env.example`: the environment variables (`ANTHROPIC_API_KEY`, the first-start
@@ -102,7 +103,7 @@ With Portainer: **Stacks → Add stack → Repository**, this repo, compose path
 When the Frigate+ sign-in expires, the page shows a banner where you paste a new refresh token.
 
 Settings can also come from environment variables: `FRIGATE_LABELER_CONFIG`, `FRIGATE_LABELER_DATA`,
-`FRIGATE_LABELER_HOST` and `FRIGATE_LABELER_PORT`.
+`FRIGATE_LABELER_HOST`, `FRIGATE_LABELER_PORT` and `FRIGATE_LABELER_BASE_PATH`.
 
 ## Cost
 

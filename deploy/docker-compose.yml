@@ -13,6 +13,7 @@ services:
     container_name: frigate-labeler
     restart: unless-stopped
     environment:
+      FRIGATE_LABELER_BASE_PATH: ${FRIGATE_LABELER_BASE_PATH:-/frigate-labeler}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # Only needed for the first start; afterwards it's kept in the config volume, and you can
       # paste a new one on the web page when it expires.

@@ -227,12 +227,12 @@ $("navLabel").onclick = () => showTab("label");
 $("navReview").onclick = () => showTab("review");
 $("cancelQueue").onclick = async () => {
   if (!confirm("Remove everything still waiting in the queue? The image being labeled now will finish.")) return;
-  await api("/api/queue/cancel", { method: "POST" }); refresh();
+  await api("api/queue/cancel", { method: "POST" }); refresh();
 };
 
 async function refresh() {
   try {
-    const st = await api("/api/state");
+    const st = await api("api/state");
     runs = st.runs; jobStatus = st.labeling;
     renderJob();
     renderTabs(); renderRunList();
@@ -262,7 +262,7 @@ let images = [], nextCursor = null, picked = new Set(), lastClicked = -1, loadin
 
 async function loadCameras() {
   try {
-    const res = await api("/api/cameras");
+    const res = await api("api/cameras");
     cameras = res.cameras; supported = res.supported;
     if (camSel && !cameras.some(c => c.name === camSel)) camSel = "";
     renderCamList(); renderLabelHead();
@@ -346,7 +346,7 @@ async function loadGrid(reset) {
   try {
     const q = new URLSearchParams({ camera: camSel, filter: lfilter });
     if (nextCursor) q.set("cursor", nextCursor);
-    const res = await api("/api/browse?" + q);
+    const res = await api("api/browse?" + q);
     const have = new Set(images.map(i => i.id));
     images = images.concat(res.images.filter(i => !have.has(i.id))); nextCursor = res.images.length ? res.next : null;
     renderGrid();
@@ -360,7 +360,7 @@ function renderGrid() {
     const what = im.unverifiedLabels.length === 0 ? "all labels verified"
       : im.verifiedLabels.length === 0 ? "not verified" : "needs: " + im.unverifiedLabels.join(", ");
     return `<div class="tile ${picked.has(im.id) ? "sel" : ""}" data-i="${i}" title="${esc(im.id)}\n${esc(what)}">
-      <img loading="lazy" src="/api/thumbs/${im.id}" alt="">
+      <img loading="lazy" src="api/thumbs/${im.id}" alt="">
       <span class="chk">${picked.has(im.id) ? "✓" : ""}</span>
       ${im.local ? `<span class="st badge b-${im.local}">${statusName[im.local] || im.local}</span>` : ""}
       <span class="cap">${esc(what)}</span></div>`;
@@ -391,7 +391,7 @@ function updateSelButton() {
 async function planAndConfirm(req, what) {
   modal(`<h3>Label ${esc(what)}</h3><div class="meta">Working out what needs labeling…</div>`);
   let plan;
-  try { plan = await api("/api/label", { method: "POST", body: JSON.stringify({ ...req, dryRun: true }) }); }
+  try { plan = await api("api/label", { method: "POST", body: JSON.stringify({ ...req, dryRun: true }) }); }
   catch (e) { modal(`<h3>Couldn't plan that</h3><div class="issue">${esc(e.message)}</div><div class="row"><button onclick="closeModal()">Close</button></div>`); return; }
   const skips = [
     plan.skippedLabeled && `${plural(plan.skippedLabeled, "image")} already labeled (waiting in Review)`,
@@ -414,7 +414,7 @@ async function planAndConfirm(req, what) {
   $("goBtn").onclick = async () => {
     $("goBtn").disabled = true;
     try {
-      const res = await api("/api/label", { method: "POST", body: JSON.stringify({ ...req, dryRun: false }) });
+      const res = await api("api/label", { method: "POST", body: JSON.stringify({ ...req, dryRun: false }) });
       closeModal(); picked.clear(); refresh();
       if (camSel) loadGrid(true);
       toast(`Queued ${plural(res.queued, "image")}. Results appear on the Review tab as they finish.`);
@@ -462,14 +462,14 @@ function renderRunList() {
 
 async function open(id, keepView = false) {
   if (dirty) await saveNow();
-  const data = await api(`/api/runs/${id}`);
+  const data = await api(`api/runs/${id}`);
   const sameImage = cur && cur.run.imageId === id;
   cur = data;
   boxes = cur.run.objects.map(o => ({ label: o.label, x1: o.box.x1, y1: o.box.y1, x2: o.box.x2, y2: o.box.y2, difficult: o.difficult, note: o.note }));
   sel = -1; adding = false; dirty = false;
   $("emptyMsg").style.display = "none";
   const img = $("img");
-  if (!sameImage) { img.src = `/api/runs/${id}/image`; await img.decode().catch(() => {}); }
+  if (!sameImage) { img.src = `api/runs/${id}/image`; await img.decode().catch(() => {}); }
   const W = cur.run.imageWidth, H = cur.run.imageHeight;
   img.width = W; img.height = H;
   const svg = $("svg"); svg.setAttribute("width", W); svg.setAttribute("height", H); svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
@@ -613,7 +613,7 @@ async function saveNow() {
   if (!dirty || !cur) return;
   dirty = false;
   try {
-    const res = await api(`/api/runs/${cur.run.imageId}/objects`, { method: "PUT", body: JSON.stringify({ objects: boxes }) });
+    const res = await api(`api/runs/${cur.run.imageId}/objects`, { method: "PUT", body: JSON.stringify({ objects: boxes }) });
     cur.run = res.run; cur.status = res.status; setSaveState("Saved ✓"); refresh();
   } catch (e) { dirty = true; setSaveState("Save failed: " + e.message); }
 }
@@ -714,9 +714,9 @@ async function sendFeedback() {
   if (dirty) await saveNow();
   busy = true; $("busy").classList.add("on");
   try {
-    const res = await api(`/api/runs/${cur.run.imageId}/feedback`, { method: "POST", body: JSON.stringify({ text, answers }) });
+    const res = await api(`api/runs/${cur.run.imageId}/feedback`, { method: "POST", body: JSON.stringify({ text, answers }) });
     cur.run = res.run; cur.status = res.status;
-    if (answers.some(a => a.remember)) cur.cameraNotes = (await api(`/api/cameras/${encodeURIComponent(cur.run.camera)}/notes`)).notes;
+    if (answers.some(a => a.remember)) cur.cameraNotes = (await api(`api/cameras/${encodeURIComponent(cur.run.camera)}/notes`)).notes;
     boxes = cur.run.objects.map(o => ({ label: o.label, x1: o.box.x1, y1: o.box.y1, x2: o.box.x2, y2: o.box.y2, difficult: o.difficult, note: o.note }));
     sel = -1; renderSide(); draw();
     msg(cur.run.uncertain.length ? "Updated. Claude still has questions." : "Updated. Check the boxes, then approve.", "ok");
@@ -730,7 +730,7 @@ async function approve(force, verify) {
   if (!force && open && !confirm(`Claude still has ${open} open question(s) on this image. Submit anyway?`)) return;
   $("approveBtn").disabled = $("saveOnlyBtn").disabled = true; msg("Submitting…");
   try {
-    const res = await api(`/api/runs/${cur.run.imageId}/approve`, { method: "POST", body: JSON.stringify({ force, verify }) });
+    const res = await api(`api/runs/${cur.run.imageId}/approve`, { method: "POST", body: JSON.stringify({ force, verify }) });
     if (!res.ok) {
       msg(res.message, "err"); $("approveBtn").disabled = $("saveOnlyBtn").disabled = false;
       if (res.message.includes("changed since") && confirm(res.message + "\n\nOverwrite the boxes on Frigate+?")) return approve(true, verify);
@@ -740,7 +740,7 @@ async function approve(force, verify) {
   } catch (e) { msg(e.message, "err"); $("approveBtn").disabled = $("saveOnlyBtn").disabled = false; }
 }
 async function saveNotes() {
-  const res = await api(`/api/cameras/${encodeURIComponent(cur.run.camera)}/notes`, { method: "PUT", body: JSON.stringify({ notes: $("notesText").value }) });
+  const res = await api(`api/cameras/${encodeURIComponent(cur.run.camera)}/notes`, { method: "PUT", body: JSON.stringify({ notes: $("notesText").value }) });
   cur.cameraNotes = res.notes; msg("Camera notes saved. They apply to images labeled or revised from now on.", "ok");
 }
 function goNext(dir, afterApprove = false) {
@@ -787,7 +787,7 @@ window.addEventListener("resize", () => cur && fit());
 // ======================= Frigate+ sign-in =======================
 async function checkAuth() {
   try {
-    const a = await api("/api/auth");
+    const a = await api("api/auth");
     $("authBar").style.display = a.ok ? "none" : "";
     if (!a.ok) $("authProblem").textContent = a.problem || "";
   } catch { /* server unreachable: the status line already says so */ }
@@ -796,7 +796,7 @@ $("authSave").onclick = async () => {
   const token = $("authToken").value.trim(); if (!token) return;
   $("authSave").disabled = true;
   try {
-    const a = await api("/api/auth", { method: "POST", body: JSON.stringify({ refreshToken: token }) });
+    const a = await api("api/auth", { method: "POST", body: JSON.stringify({ refreshToken: token }) });
     $("authToken").value = "";
     if (a.ok) { $("authBar").style.display = "none"; if (tab === "label") loadCameras(); }
     else $("authProblem").textContent = a.problem;
