@@ -58,9 +58,9 @@ public sealed class ReviewServer(RunStore store, FrigateClient frigate, Func<Cla
         {
             if (string.IsNullOrWhiteSpace(req.RefreshToken)) return Results.BadRequest("Paste a refresh token.");
             frigate.ReplaceRefreshToken(req.RefreshToken);
-            return await frigate.CheckAuthAsync(rct) is { } problem
-                ? Results.Ok(new { ok = false, problem })
-                : Results.Ok(new { ok = true, problem = (string?)null });
+            if (await frigate.CheckAuthAsync(rct) is { } problem) return Results.Ok(new { ok = false, problem });
+            job.Resume();   // labeling paused on the expired sign-in carries on
+            return Results.Ok(new { ok = true, problem = (string?)null });
         });
 
         // ---------- shared state ----------
@@ -126,8 +126,9 @@ public sealed class ReviewServer(RunStore store, FrigateClient frigate, Func<Cla
         app.MapPost("/api/label", async (LabelRequest req, CancellationToken rct) =>
         {
             var plan = await PlanAsync(req, rct);
-            var queued = req.DryRun ? 0 : job.Enqueue(plan.ToLabel);
-            if (queued > 0) Console.WriteLine($"  queued {queued} image(s) from the Label tab");
+            var queued = req.DryRun ? 0 : job.Enqueue(plan.ToLabel, req.OneAtATime);
+            if (queued > 0) Console.WriteLine($"  queued {queued} image(s) from the Label tab " +
+                                              (req.OneAtATime ? "(one at a time)" : "(all at once)"));
             return new
             {
                 matched = plan.Matched,
@@ -142,6 +143,8 @@ public sealed class ReviewServer(RunStore store, FrigateClient frigate, Func<Cla
         });
 
         app.MapPost("/api/queue/cancel", () => new { cancelled = job.CancelPending() });
+        app.MapPost("/api/queue/next", () => { job.Advance(); return new { ok = true }; });
+        app.MapPost("/api/queue/all", () => new { moved = job.ProcessRestNow() });
 
         // ---------- Review tab ----------
 
@@ -222,6 +225,7 @@ public sealed class ReviewServer(RunStore store, FrigateClient frigate, Func<Cla
                 return Results.Ok(new { ok = true, message = $"Verified {run.LabelsToVerify().Count} label(s)." });
             }
             var (ok, message) = await Submitter.SubmitAsync(frigate, store, run, req.Force, req.Verify, rct);
+            if (ok) job.Released(run.ImageId);   // one at a time: start labeling the next image
             Console.WriteLine($"  review page: {(ok ? "submitted" : "submit failed for")} {run.Camera}/{run.ImageId} — {message}");
             return Results.Ok(new { ok, message });
         }));
@@ -372,7 +376,8 @@ public sealed class ReviewServer(RunStore store, FrigateClient frigate, Func<Cla
     };
 
     public sealed record CameraCounts(int Unverified, int New, DateTimeOffset At);
-    public sealed record LabelRequest(List<string>? ImageIds, string? Camera, string? Filter, bool Relabel, bool DryRun);
+    public sealed record LabelRequest(List<string>? ImageIds, string? Camera, string? Filter, bool Relabel, bool DryRun,
+        bool OneAtATime = true);
     public sealed record BoxDto(string Label, double X1, double Y1, double X2, double Y2, bool Difficult, string? Note);
     public sealed record SaveObjectsRequest(List<BoxDto> Objects);
     public sealed record AnswerDto(string Question, string Answer, bool Remember);

@@ -139,6 +139,8 @@
     <h1>Frigate+ Labeler</h1>
     <nav><button id="navLabel">Label</button><button id="navReview">Review</button></nav>
     <span id="job"></span>
+    <button id="nextImage" style="display:none" title="Label the next one-at-a-time image without approving this one">Next image</button>
+    <button id="processAll" style="display:none" title="Label everything still waiting, back to back">Process the rest now</button>
     <button id="cancelQueue" class="danger" style="display:none">Cancel queue</button>
   </header>
   <div id="authBar" class="warnbox" style="display:none;margin:8px 14px">
@@ -225,6 +227,12 @@ function showTab(t) {
 }
 $("navLabel").onclick = () => showTab("label");
 $("navReview").onclick = () => showTab("review");
+$("nextImage").onclick = async () => { await api("api/queue/next", { method: "POST" }); refresh(); };
+$("processAll").onclick = async () => {
+  const n = jobStatus ? jobStatus.oneAtATime : 0;
+  if (!confirm(`Label the remaining ${n} image(s) back to back now (≈ ${money(jobStatus && jobStatus.average != null ? jobStatus.average * n : null)})?`)) return;
+  await api("api/queue/all", { method: "POST" }); refresh();
+};
 $("cancelQueue").onclick = async () => {
   if (!confirm("Remove everything still waiting in the queue? The image being labeled now will finish.")) return;
   await api("api/queue/cancel", { method: "POST" }); refresh();
@@ -239,7 +247,12 @@ async function refresh() {
     if (cur) {
       const s = runs.find(r => r.id === cur.run.imageId);
       if (s && s.status !== cur.status && !dirty && !saving && !busy) await open(cur.run.imageId, true);
-    } else if (tab === "review" && runs.length) { const f = visibleRuns()[0]; if (f) open(f.id); }
+    }
+    // Nothing open, or the open image is submitted: show the next waiting one as soon as it exists.
+    if (tab === "review" && (!cur || (cur.run.submittedAt && !busy))) {
+      const f = visibleRuns().find(r => !cur || r.id !== cur.run.imageId);
+      if (f) open(f.id);
+    }
   } catch (e) { $("job").textContent = "Lost connection to the labeler (" + e.message + ")"; }
 }
 
@@ -247,13 +260,19 @@ function renderJob() {
   const j = jobStatus, total = runs.reduce((a, r) => a + r.cost, 0);
   const need = runs.filter(r => r.status === "needs-input").length, ready = runs.filter(r => r.status === "ready").length;
   let html = `Review: <b>${need}</b> need input · <b>${ready}</b> ready · total spent ${money(total)}`;
+  const step = j && j.oneAtATime ? (j.active ? ` · ${j.oneAtATime} more one at a time`
+    : ` · <b>${j.oneAtATime}</b> waiting one at a time: the next starts when you approve this one`) : "";
   if (j && (j.active || j.queued)) {
-    html = `Labeling <b>${esc(j.current || "…")}</b> · <b>${j.queued}</b> waiting · this session ${money(j.spent)}`
+    html = `Labeling <b>${esc(j.current || "…")}</b> · <b>${j.queued}</b> waiting${step} · this session ${money(j.spent)}`
       + ` · avg ${money(j.average)}/image · remaining ≈ ${money(j.remaining)} &nbsp;|&nbsp; ` + html;
+  } else if (step) {
+    html = step.slice(3) + ` · this session ${money(j.spent)} &nbsp;|&nbsp; ` + html;
   } else if (j && j.processed) html = `Queue empty (${j.processed} done this session, ${money(j.spent)}${j.failed ? ", " + j.failed + " failed" : ""}) &nbsp;|&nbsp; ` + html;
   if (j && j.lastError) html += ` &nbsp;|&nbsp; <span style="color:var(--danger)">last error: ${esc(j.lastError)}</span>`;
   $("job").innerHTML = html;
-  $("cancelQueue").style.display = j && j.queued ? "" : "none";
+  $("cancelQueue").style.display = j && (j.queued || j.oneAtATime) ? "" : "none";
+  $("nextImage").style.display = j && j.oneAtATime && !j.active ? "" : "none";
+  $("processAll").style.display = j && j.oneAtATime ? "" : "none";
 }
 
 // ======================= Label tab =======================
@@ -409,17 +428,24 @@ async function planAndConfirm(req, what) {
     <div class="meta">${plan.averageCost != null ? `Based on ${money(plan.averageCost)} per image so far; busy scenes cost more.` : "Cost estimate available after the first image."}
       Every image is checked for all of its camera's labels.</div>
     ${skips.length ? `<div class="meta">Skipping ${skips.join(", ")}.</div>` : ""}
+    <div class="meta"><b>One at a time</b> labels the next image only after you approve the current one, so you only
+      pay for what you review and your answers carry over. <b>All at once</b> labels everything in the background now.</div>
     <div class="row" style="justify-content:flex-end"><button onclick="closeModal()">Cancel</button>
-      <button class="primary" id="goBtn">Add to queue</button></div>`);
-  $("goBtn").onclick = async () => {
-    $("goBtn").disabled = true;
+      ${plan.toLabel > 1 ? `<button id="goAll">Process all at once</button>` : ""}
+      <button class="primary" id="goBtn">${plan.toLabel > 1 ? "Label one at a time" : "Label it"}</button></div>`);
+  const go = async oneAtATime => {
+    $("goBtn").disabled = true; if ($("goAll")) $("goAll").disabled = true;
     try {
-      const res = await api("api/label", { method: "POST", body: JSON.stringify({ ...req, dryRun: false }) });
+      const res = await api("api/label", { method: "POST", body: JSON.stringify({ ...req, dryRun: false, oneAtATime }) });
       closeModal(); picked.clear(); refresh();
       if (camSel) loadGrid(true);
-      toast(`Queued ${plural(res.queued, "image")}. Results appear on the Review tab as they finish.`);
+      toast(oneAtATime
+        ? `Queued ${plural(res.queued, "image")} one at a time. The first appears on the Review tab when it's ready.`
+        : `Queued ${plural(res.queued, "image")}. Results appear on the Review tab as they finish.`);
     } catch (e) { modal(`<h3>Couldn't queue that</h3><div class="issue">${esc(e.message)}</div><div class="row"><button onclick="closeModal()">Close</button></div>`); }
   };
+  $("goBtn").onclick = () => go(true);
+  if ($("goAll")) $("goAll").onclick = () => go(false);
 }
 
 function modal(html) { $("modalCard").innerHTML = html; $("modal").classList.add("on"); }
@@ -767,6 +793,8 @@ async function approve(force, verify) {
       return;
     }
     msg(res.message, "ok"); await refresh(); goNext(1, true);
+    if (jobStatus && (jobStatus.oneAtATime || jobStatus.active) && !visibleRuns().some(r => r.id !== cur.run.imageId))
+      msg(res.message + " Labeling the next image; it opens here when it's ready.", "ok");
   } catch (e) { msg(e.message, "err"); $("approveBtn").disabled = $("saveOnlyBtn").disabled = false; }
 }
 async function saveNotes() {
