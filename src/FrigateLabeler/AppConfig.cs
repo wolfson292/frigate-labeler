@@ -22,7 +22,8 @@ public sealed record AppConfig
     /// <summary>Creates config.json with a placeholder key if it doesn't exist yet.</summary>
     public static bool CreateTemplate()
     {
-        if (File.Exists(FilePath)) return false;
+        if (File.Exists(FilePath) || InContainer
+            || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY"))) return false;
         AppPaths.WritePrivate(FilePath,
             JsonSerializer.Serialize(new AppConfig { AnthropicApiKey = ApiKeyPlaceholder }, AppPaths.Json));
         return true;
@@ -37,13 +38,23 @@ public sealed record AppConfig
         if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY")))
             return new AnthropicClient();
 
-        if (AnthropicApiKey == ApiKeyPlaceholder)
-            throw new ConfigException($"Replace the placeholder API key in {FilePath} with your Anthropic API key.");
+        // In a container there's no `ant auth login` profile to fall back on, so a missing key is an error.
+        if (AnthropicApiKey == ApiKeyPlaceholder || (InContainer && string.IsNullOrWhiteSpace(AnthropicApiKey)))
+            throw new ConfigException(MissingKeyMessage);
 
         return string.IsNullOrWhiteSpace(AnthropicApiKey)
             ? new AnthropicClient()
             : new AnthropicClient { ApiKey = AnthropicApiKey.Trim() };
     }
+
+    /// <summary>Where to put the key, worded for wherever the app is running.</summary>
+    public static string MissingKeyMessage =>
+        InContainer
+            ? "No Claude API key. Set the ANTHROPIC_API_KEY environment variable on the container " +
+              "(in Portainer: the stack's Environment variables), then redeploy."
+            : $"No Claude API key. Set the ANTHROPIC_API_KEY environment variable, or replace the placeholder in {FilePath}.";
+
+    private static bool InContainer => Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") == "true";
 
     public string DescribeApiKeySource() =>
         !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY")) ? "ANTHROPIC_API_KEY environment variable"
