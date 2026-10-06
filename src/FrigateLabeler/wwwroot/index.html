@@ -1,0 +1,816 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Frigate+ Labeler</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --ink: #1d2330; --muted: #677085; --line: #dde1e8;
+    --accent: #2f6fde; --accent-ink: #fff; --warn: #c2410c; --warn-bg: #fff4ed; --ok: #15803d; --ok-bg: #effaf2;
+    --danger: #c62828; --stage: #11151c; --chip: #eef1f6; --sel: rgba(47,111,222,.18);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1218; --panel: #171b23; --ink: #e6e9ef; --muted: #8b93a5; --line: #2a303c;
+      --accent: #5b8ff0; --accent-ink: #0b0e13; --warn: #fb923c; --warn-bg: #2a1a10; --ok: #4ade80; --ok-bg: #10241a;
+      --danger: #f87171; --stage: #07090c; --chip: #222835; --sel: rgba(91,143,240,.25);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  button, select, textarea, input { font: inherit; color: inherit; }
+  button { cursor: pointer; border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 5px 10px; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  button.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button.danger { color: var(--danger); }
+  button.link { border: 0; background: none; color: var(--accent); padding: 0; }
+  select, textarea, input[type=text] { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 7px; }
+  textarea { width: 100%; resize: vertical; min-height: 54px; }
+  kbd { font: 11px ui-monospace, monospace; background: var(--chip); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+  a { color: var(--accent); }
+
+  .shell { display: grid; grid-template-rows: auto 1fr; height: 100vh; }
+  header { display: flex; align-items: center; gap: 14px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 15px; margin: 0; white-space: nowrap; }
+  nav { display: flex; gap: 4px; }
+  nav button { padding: 4px 14px; }
+  #job { color: var(--muted); font-size: 13px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #job b { color: var(--ink); font-weight: 600; }
+  .view { display: none; min-height: 0; }
+  .view.on { display: grid; }
+
+  /* ---------- shared ---------- */
+  aside.list { border-right: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+  .tabs { display: flex; gap: 4px; padding: 8px; flex-wrap: wrap; border-bottom: 1px solid var(--line); }
+  .tabs button { padding: 3px 8px; font-size: 12px; }
+  .scroll { overflow: auto; flex: 1; }
+  .item { padding: 8px 10px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .item:hover { background: var(--chip); }
+  .item.sel { background: var(--chip); box-shadow: inset 3px 0 0 var(--accent); }
+  .item .top { display: flex; justify-content: space-between; gap: 6px; }
+  .item .name { font-weight: 600; }
+  .sub { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .badge { font-size: 11px; padding: 1px 6px; border-radius: 10px; white-space: nowrap; }
+  .b-needs-input { background: var(--warn-bg); color: var(--warn); }
+  .b-ready, .b-queued { background: var(--chip); color: var(--ink); }
+  .b-queued { outline: 1px dashed var(--muted); }
+  .b-submitted { background: var(--ok-bg); color: var(--ok); }
+  .b-unreviewed, .b-nothing-to-do { background: var(--chip); color: var(--muted); }
+  .chip { display: inline-block; font-size: 12px; padding: 1px 7px; border-radius: 10px; background: var(--chip); margin: 2px 2px 0 0; }
+  .chip.missing { background: var(--warn-bg); color: var(--warn); }
+  .meta { color: var(--muted); font-size: 12px; }
+  .empty { color: var(--muted); padding: 40px; text-align: center; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+  /* ---------- Label tab ---------- */
+  #labelView { grid-template-columns: 250px 1fr; }
+  .lmain { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+  .lhead { padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; gap: 8px; }
+  .lhead h2 { margin: 0; font-size: 17px; }
+  .warnbox { border: 1px solid var(--warn); background: var(--warn-bg); border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+  #grid { overflow: auto; flex: 1; padding: 12px 16px; display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 10px; align-content: start; }
+  .tile { position: relative; border-radius: 8px; overflow: hidden; background: var(--stage); cursor: pointer; border: 2px solid transparent;
+    aspect-ratio: 16 / 9; user-select: none; }
+  .tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .tile.sel { border-color: var(--accent); }
+  .tile.sel::after { content: ""; position: absolute; inset: 0; background: var(--sel); }
+  .tile .chk { position: absolute; top: 6px; left: 6px; width: 20px; height: 20px; border-radius: 5px; background: rgba(0,0,0,.5);
+    border: 2px solid #fff; z-index: 1; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 13px; }
+  .tile.sel .chk { background: var(--accent); border-color: var(--accent); }
+  .tile .cap { position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 6px 4px; font-size: 11px; color: #fff; z-index: 1;
+    background: linear-gradient(transparent, rgba(0,0,0,.8)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tile .st { position: absolute; top: 6px; right: 6px; z-index: 1; }
+  .more { grid-column: 1 / -1; text-align: center; padding: 10px; }
+  .selbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .camtable { width: 100%; border-collapse: collapse; }
+  .camtable td, .camtable th { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .camtable th { font-size: 12px; color: var(--muted); font-weight: 600; }
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; align-items: center; justify-content: center; z-index: 20; }
+  .modal.on { display: flex; }
+  .modal .card { background: var(--panel); border-radius: 12px; padding: 18px 20px; width: min(460px, 92vw); display: flex; flex-direction: column; gap: 10px; }
+  .modal h3 { margin: 0; }
+  .modal .big { font-size: 22px; font-weight: 700; }
+
+  /* ---------- Review tab ---------- */
+  #reviewView { grid-template-columns: 250px 1fr 340px; }
+  main.stage { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .toolbar { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
+  .toolbar .sep { width: 1px; height: 22px; background: var(--line); margin: 0 4px; }
+  .toolbar label { display: inline-flex; align-items: center; gap: 4px; }
+  #zoomPct { width: 44px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+  #viewport { flex: 1; position: relative; overflow: hidden; background: var(--stage); touch-action: none; cursor: grab; }
+  #viewport.adding { cursor: crosshair; }
+  #viewport.panning { cursor: grabbing; }
+  #canvas { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+  #canvas img { display: block; user-select: none; -webkit-user-drag: none; }
+  #canvas svg { position: absolute; left: 0; top: 0; overflow: visible; }
+  .hint { position: absolute; left: 10px; bottom: 8px; color: #aab; font-size: 12px; pointer-events: none;
+    background: rgba(0,0,0,.45); padding: 3px 8px; border-radius: 4px; }
+  aside.side { border-left: 1px solid var(--line); background: var(--panel); overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 14px; }
+  .side h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 6px; }
+  .q { border: 1px solid var(--warn); background: var(--warn-bg); border-radius: 8px; padding: 8px; margin-bottom: 8px; }
+  .q .qt { cursor: pointer; margin-bottom: 6px; }
+  .q .qt b { color: var(--warn); }
+  .q label { font-size: 12px; color: var(--muted); display: flex; gap: 4px; align-items: center; margin-top: 4px; }
+  .issue { color: var(--warn); font-size: 13px; margin: 4px 0; }
+  .boxrow { display: grid; grid-template-columns: 30px 1fr auto auto; gap: 6px; align-items: center; padding: 3px 4px; border-radius: 6px; cursor: pointer; }
+  .boxrow.sel { background: var(--chip); outline: 1px solid var(--accent); }
+  .boxrow .id { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .boxrow select { padding: 2px 4px; }
+  .note { font-size: 12px; color: var(--muted); margin: -2px 0 4px 36px; }
+  .actions { position: sticky; bottom: -12px; background: var(--panel); padding: 10px 0 12px; border-top: 1px solid var(--line);
+    display: flex; flex-direction: column; gap: 8px; margin-top: auto; }
+  #msg { font-size: 13px; min-height: 18px; }
+  #msg.err { color: var(--danger); } #msg.ok { color: var(--ok); }
+  details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  .history { font-size: 12px; color: var(--muted); white-space: pre-wrap; border-left: 2px solid var(--line); padding-left: 8px; margin: 6px 0; }
+  .busy { position: absolute; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: center; justify-content: center; color: #fff; font-size: 15px; z-index: 5; }
+  .busy.on { display: flex; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <header>
+    <h1>Frigate+ Labeler</h1>
+    <nav><button id="navLabel">Label</button><button id="navReview">Review</button></nav>
+    <span id="job"></span>
+    <button id="cancelQueue" class="danger" style="display:none">Cancel queue</button>
+  </header>
+  <div id="authBar" class="warnbox" style="display:none;margin:8px 14px">
+    <b>Frigate+ sign-in needed.</b> <span id="authProblem"></span>
+    <div class="row" style="margin-top:6px">
+      <input type="password" id="authToken" placeholder="Paste your Frigate+ refresh token" style="flex:1;min-width:260px" autocomplete="off">
+      <button class="primary" id="authSave">Sign in</button>
+    </div>
+    <div class="meta" style="margin-top:4px">On plus.frigate.video: Developer Tools → Console → run
+      <code>copy(localStorage.getItem(Object.keys(localStorage).find(k =&gt; k.endsWith('.refreshToken'))))</code>, then paste here.</div>
+  </div>
+
+  <!-- ======================= Label tab ======================= -->
+  <section class="view" id="labelView">
+    <aside class="list">
+      <div class="tabs"><span class="meta">Cameras</span></div>
+      <div class="scroll" id="camList"></div>
+    </aside>
+    <div class="lmain">
+      <div class="lhead" id="lhead"></div>
+      <div id="grid"></div>
+    </div>
+  </section>
+
+  <!-- ======================= Review tab ======================= -->
+  <section class="view" id="reviewView">
+    <aside class="list">
+      <div class="tabs" id="tabs"></div>
+      <div class="scroll" id="runs"></div>
+    </aside>
+    <main class="stage">
+      <div class="toolbar">
+        <button id="fit" title="Fit image (F)">Fit</button>
+        <button id="zoomOut" title="Zoom out (−)">−</button>
+        <span id="zoomPct">100%</span>
+        <button id="zoomIn" title="Zoom in (+)">+</button>
+        <span class="sep"></span>
+        <button id="addBtn" title="Draw a new box (A)">+ Box <kbd>A</kbd></button>
+        <select id="labelSel" title="Label for the selected box, and for new boxes"></select>
+        <label title="Toggle difficult (D)"><input type="checkbox" id="diffChk"> difficult <kbd>D</kbd></label>
+        <button id="delBtn" class="danger" title="Delete selected box (Del)">Delete <kbd>Del</kbd></button>
+        <span class="sep"></span>
+        <label title="Hide boxes to see the image (H)"><input type="checkbox" id="hideChk"> hide boxes <kbd>H</kbd></label>
+        <label title="Show what Frigate's detector found"><input type="checkbox" id="frigateChk"> Frigate's detections</label>
+        <span class="sep"></span>
+        <span id="saveState" class="meta"></span>
+      </div>
+      <div id="viewport">
+        <div id="canvas"><img id="img" alt=""><svg id="svg"></svg></div>
+        <div class="empty" id="emptyMsg">Nothing to review yet. Pick images on the Label tab.</div>
+        <div class="hint">Drag to pan · scroll to zoom · drag a box to move · drag corners to resize · arrows nudge (⇧ ×10) · <kbd>J</kbd>/<kbd>K</kbd> next/prev · grey boxes are already verified</div>
+        <div class="busy" id="busy">Claude is revising this image…</div>
+      </div>
+    </main>
+    <aside class="side" id="side"><div class="meta">Nothing selected.</div></aside>
+  </section>
+</div>
+
+<div class="modal" id="modal"><div class="card" id="modalCard"></div></div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const api = async (path, opts = {}) => {
+  const res = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts });
+  const text = await res.text();
+  let body; try { body = text ? JSON.parse(text) : null; } catch { body = text; }
+  if (!res.ok) throw new Error((body && (body.detail || body.title)) || (typeof body === "string" && body) || res.statusText);
+  return body;
+};
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const money = v => v == null ? "—" : "$" + v.toFixed(v < 1 ? 3 : 2);
+const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+
+// ======================= navigation + shared status =======================
+let tab = localStorage.getItem("tab") || "label";
+let runs = [], jobStatus = null;
+function showTab(t) {
+  tab = t; localStorage.setItem("tab", t);
+  $("labelView").classList.toggle("on", t === "label"); $("reviewView").classList.toggle("on", t === "review");
+  $("navLabel").classList.toggle("active", t === "label"); $("navReview").classList.toggle("active", t === "review");
+  if (t === "review") { if (!cur) { const f = visibleRuns()[0]; if (f) open(f.id); } else fit(); }
+  if (t === "label") loadCameras();
+}
+$("navLabel").onclick = () => showTab("label");
+$("navReview").onclick = () => showTab("review");
+$("cancelQueue").onclick = async () => {
+  if (!confirm("Remove everything still waiting in the queue? The image being labeled now will finish.")) return;
+  await api("/api/queue/cancel", { method: "POST" }); refresh();
+};
+
+async function refresh() {
+  try {
+    const st = await api("/api/state");
+    runs = st.runs; jobStatus = st.labeling;
+    renderJob();
+    renderTabs(); renderRunList();
+    if (cur) {
+      const s = runs.find(r => r.id === cur.run.imageId);
+      if (s && s.status !== cur.status && !dirty && !busy) await open(cur.run.imageId, true);
+    } else if (tab === "review" && runs.length) { const f = visibleRuns()[0]; if (f) open(f.id); }
+  } catch (e) { $("job").textContent = "Lost connection to the labeler (" + e.message + ")"; }
+}
+
+function renderJob() {
+  const j = jobStatus, total = runs.reduce((a, r) => a + r.cost, 0);
+  const need = runs.filter(r => r.status === "needs-input").length, ready = runs.filter(r => r.status === "ready").length;
+  let html = `Review: <b>${need}</b> need input · <b>${ready}</b> ready · total spent ${money(total)}`;
+  if (j && (j.active || j.queued)) {
+    html = `Labeling <b>${esc(j.current || "…")}</b> · <b>${j.queued}</b> waiting · this session ${money(j.spent)}`
+      + ` · avg ${money(j.average)}/image · remaining ≈ ${money(j.remaining)} &nbsp;|&nbsp; ` + html;
+  } else if (j && j.processed) html = `Queue empty (${j.processed} done this session, ${money(j.spent)}${j.failed ? ", " + j.failed + " failed" : ""}) &nbsp;|&nbsp; ` + html;
+  if (j && j.lastError) html += ` &nbsp;|&nbsp; <span style="color:var(--danger)">last error: ${esc(j.lastError)}</span>`;
+  $("job").innerHTML = html;
+  $("cancelQueue").style.display = j && j.queued ? "" : "none";
+}
+
+// ======================= Label tab =======================
+let cameras = [], supported = {}, camSel = localStorage.getItem("camera") || "", lfilter = localStorage.getItem("lfilter") || "unverified";
+let images = [], nextCursor = null, picked = new Set(), lastClicked = -1, loadingGrid = false;
+
+async function loadCameras() {
+  try {
+    const res = await api("/api/cameras");
+    cameras = res.cameras; supported = res.supported;
+    if (camSel && !cameras.some(c => c.name === camSel)) camSel = "";
+    renderCamList(); renderLabelHead();
+    if (camSel && !images.length) loadGrid(true);
+    if (!camSel) renderAllCameras();
+  } catch (e) { $("lhead").innerHTML = `<div class="warnbox">Couldn't reach Frigate+: ${esc(e.message)}</div>`; }
+}
+
+function counts(c) { return c.counts ? `${c.counts.unverified} unverified · ${c.counts.new} new` : "counting…"; }
+
+function renderCamList() {
+  const totalUnv = cameras.reduce((a, c) => a + (c.counts ? c.counts.unverified : 0), 0);
+  $("camList").innerHTML = `<div class="item ${camSel ? "" : "sel"}" data-c="">
+      <div class="top"><span class="name">All cameras</span></div>
+      <div class="sub">${totalUnv} unverified images</div></div>` +
+    cameras.map(c => `<div class="item ${c.name === camSel ? "sel" : ""}" data-c="${esc(c.name)}">
+      <div class="top"><span class="name">${esc(c.name)}</span>${c.notEnabled.length ? `<span class="badge b-needs-input" title="Supported labels not enabled">${c.notEnabled.length} labels off</span>` : ""}</div>
+      <div class="sub">${counts(c)} · ${c.images} total</div></div>`).join("");
+  $("camList").querySelectorAll(".item").forEach(el => el.onclick = () => {
+    camSel = el.dataset.c; localStorage.setItem("camera", camSel); picked.clear();
+    renderCamList(); renderLabelHead();
+    if (camSel) loadGrid(true); else renderAllCameras();
+  });
+}
+
+function renderLabelHead() {
+  const c = cameras.find(c => c.name === camSel);
+  const filters = [["unverified", "Unverified"], ["new", "New"], ["all", "All"]];
+  if (!c) {
+    $("lhead").innerHTML = `<h2>All cameras</h2>
+      <div class="meta">Every image is checked for every label on its camera. Earlier verified boxes are re-checked,
+        and any change to them becomes a question for you.</div>
+      <div class="row"><button class="primary" id="labelAllBtn">Label every unverified image…</button>
+        <a href="https://plus.frigate.video/dashboard/cameras/" target="_blank" rel="noopener">Camera settings on Frigate+ ↗</a></div>`;
+    $("labelAllBtn").onclick = () => planAndConfirm({ filter: "unverified" }, "every unverified image on every camera");
+    return;
+  }
+  $("lhead").innerHTML = `
+    <div class="row" style="justify-content:space-between"><h2>${esc(c.name)}</h2><span class="meta">${counts(c)} · ${c.images} total</span></div>
+    <div><span class="meta">Enabled labels:</span> ${c.labels.map(l => `<span class="chip">${esc(l)}</span>`).join("")}</div>
+    ${c.notEnabled.length ? `<div class="warnbox">Frigate+ supports ${plural(c.notEnabled.length, "label")} that aren't enabled on this camera:
+        ${c.notEnabled.map(l => `<span class="chip missing">${esc(l)}</span>`).join("")}
+        <div class="meta" style="margin-top:4px">Enable the ones this camera can see in
+        <a href="https://plus.frigate.video/dashboard/cameras/" target="_blank" rel="noopener">Frigate+ camera settings ↗</a>.
+        Existing images then show up here as unverified for the new labels, and only those labels get labeled.</div></div>` : ""}
+    <div class="row">
+      <span class="tabs" style="border:0;padding:0">${filters.map(([k, n]) => `<button data-f="${k}" class="${k === lfilter ? "active" : ""}">${n}</button>`).join("")}</span>
+      <span class="selbar">
+        <button id="selPage">Select shown</button><button id="selNone">Clear</button>
+        <button class="primary" id="labelSelBtn" disabled>Label selected</button>
+        <button id="labelCamBtn">Label all ${lfilter} in ${esc(c.name)}…</button>
+      </span>
+    </div>`;
+  $("lhead").querySelectorAll("[data-f]").forEach(b => b.onclick = () => {
+    lfilter = b.dataset.f; localStorage.setItem("lfilter", lfilter); picked.clear(); renderLabelHead(); loadGrid(true);
+  });
+  $("selPage").onclick = () => { images.forEach(i => picked.add(i.id)); renderGrid(); };
+  $("selNone").onclick = () => { picked.clear(); renderGrid(); };
+  $("labelSelBtn").onclick = () => planAndConfirm({ imageIds: [...picked] }, plural(picked.size, "selected image"));
+  $("labelCamBtn").onclick = () => planAndConfirm({ camera: c.name, filter: lfilter }, `all ${lfilter} images in ${c.name}`);
+  updateSelButton();
+}
+
+function renderAllCameras() {
+  $("grid").innerHTML = `<table class="camtable" style="grid-column:1/-1">
+    <tr><th>Camera</th><th>To label</th><th>Labels</th><th></th></tr>
+    ${cameras.map(c => `<tr>
+      <td><b>${esc(c.name)}</b>${c.hasNotes ? ` <span class="chip">notes</span>` : ""}</td>
+      <td>${counts(c)}</td>
+      <td>${plural(c.labels.length, "label")} enabled${c.notEnabled.length ? ` · <span style="color:var(--warn)">${c.notEnabled.length} supported not enabled</span>` : ""}</td>
+      <td><button data-cam="${esc(c.name)}">Label unverified…</button></td></tr>`).join("")}
+  </table>`;
+  $("grid").querySelectorAll("[data-cam]").forEach(b => b.onclick = () =>
+    planAndConfirm({ camera: b.dataset.cam, filter: "unverified" }, `all unverified images in ${b.dataset.cam}`));
+}
+
+async function loadGrid(reset) {
+  if (!camSel || loadingGrid) return;
+  loadingGrid = true;
+  if (reset) { images = []; nextCursor = null; lastClicked = -1; $("grid").innerHTML = `<div class="empty more">Loading…</div>`; }
+  try {
+    const q = new URLSearchParams({ camera: camSel, filter: lfilter });
+    if (nextCursor) q.set("cursor", nextCursor);
+    const res = await api("/api/browse?" + q);
+    const have = new Set(images.map(i => i.id));
+    images = images.concat(res.images.filter(i => !have.has(i.id))); nextCursor = res.images.length ? res.next : null;
+    renderGrid();
+  } catch (e) { $("grid").innerHTML = `<div class="warnbox more">${esc(e.message)}</div>`; }
+  finally { loadingGrid = false; }
+}
+
+function renderGrid() {
+  const statusName = { "needs-input": "needs input", ready: "ready", submitted: "submitted", unreviewed: "unreviewed", queued: "queued", "nothing-to-do": "done" };
+  $("grid").innerHTML = (images.length ? images.map((im, i) => {
+    const what = im.unverifiedLabels.length === 0 ? "all labels verified"
+      : im.verifiedLabels.length === 0 ? "not verified" : "needs: " + im.unverifiedLabels.join(", ");
+    return `<div class="tile ${picked.has(im.id) ? "sel" : ""}" data-i="${i}" title="${esc(im.id)}\n${esc(what)}">
+      <img loading="lazy" src="/api/thumbs/${im.id}" alt="">
+      <span class="chk">${picked.has(im.id) ? "✓" : ""}</span>
+      ${im.local ? `<span class="st badge b-${im.local}">${statusName[im.local] || im.local}</span>` : ""}
+      <span class="cap">${esc(what)}</span></div>`;
+  }).join("") : `<div class="empty more">No ${lfilter} images on this camera.</div>`)
+    + (nextCursor ? `<div class="more"><button id="moreBtn">Load more</button></div>` : "");
+  $("grid").querySelectorAll(".tile").forEach(t => t.onclick = e => {
+    const i = +t.dataset.i;
+    if (e.shiftKey && lastClicked >= 0) {
+      const [a, b] = [Math.min(i, lastClicked), Math.max(i, lastClicked)];
+      for (let k = a; k <= b; k++) picked.add(images[k].id);
+    } else picked.has(images[i].id) ? picked.delete(images[i].id) : picked.add(images[i].id);
+    lastClicked = i; renderGrid();
+  });
+  $("grid").querySelectorAll(".tile").forEach(t => t.ondblclick = () => {
+    const im = images[+t.dataset.i];
+    if (runs.some(r => r.id === im.id)) { showTab("review"); open(im.id); }
+  });
+  if ($("moreBtn")) $("moreBtn").onclick = () => loadGrid(false);
+  updateSelButton();
+}
+
+function updateSelButton() {
+  const b = $("labelSelBtn"); if (!b) return;
+  b.disabled = picked.size === 0;
+  b.textContent = picked.size ? `Label ${plural(picked.size, "selected image")}…` : "Label selected";
+}
+
+async function planAndConfirm(req, what) {
+  modal(`<h3>Label ${esc(what)}</h3><div class="meta">Working out what needs labeling…</div>`);
+  let plan;
+  try { plan = await api("/api/label", { method: "POST", body: JSON.stringify({ ...req, dryRun: true }) }); }
+  catch (e) { modal(`<h3>Couldn't plan that</h3><div class="issue">${esc(e.message)}</div><div class="row"><button onclick="closeModal()">Close</button></div>`); return; }
+  const skips = [
+    plan.skippedLabeled && `${plural(plan.skippedLabeled, "image")} already labeled (waiting in Review)`,
+    plan.skippedVerified && `${plural(plan.skippedVerified, "image")} already verified for every label`,
+    plan.skippedQueued && `${plural(plan.skippedQueued, "image")} already in the queue`,
+  ].filter(Boolean);
+  if (!plan.toLabel) {
+    modal(`<h3>Nothing to label</h3><div>${skips.join("<br>") || "No matching images."}</div>
+      <div class="row">${plan.skippedLabeled ? `<button id="relabelBtn">Re-label those anyway…</button>` : ""}<button onclick="closeModal()">OK</button></div>`);
+    if ($("relabelBtn")) $("relabelBtn").onclick = () => planAndConfirm({ ...req, relabel: true }, what + " (re-label)");
+    return;
+  }
+  modal(`<h3>Label ${esc(what)}</h3>
+    <div class="big">${plural(plan.toLabel, "image")} · ≈ ${money(plan.estimate)}</div>
+    <div class="meta">${plan.averageCost != null ? `Based on ${money(plan.averageCost)} per image so far; busy scenes cost more.` : "Cost estimate available after the first image."}
+      Every image is checked for all of its camera's labels.</div>
+    ${skips.length ? `<div class="meta">Skipping ${skips.join(", ")}.</div>` : ""}
+    <div class="row" style="justify-content:flex-end"><button onclick="closeModal()">Cancel</button>
+      <button class="primary" id="goBtn">Add to queue</button></div>`);
+  $("goBtn").onclick = async () => {
+    $("goBtn").disabled = true;
+    try {
+      const res = await api("/api/label", { method: "POST", body: JSON.stringify({ ...req, dryRun: false }) });
+      closeModal(); picked.clear(); refresh();
+      if (camSel) loadGrid(true);
+      toast(`Queued ${plural(res.queued, "image")}. Results appear on the Review tab as they finish.`);
+    } catch (e) { modal(`<h3>Couldn't queue that</h3><div class="issue">${esc(e.message)}</div><div class="row"><button onclick="closeModal()">Close</button></div>`); }
+  };
+}
+
+function modal(html) { $("modalCard").innerHTML = html; $("modal").classList.add("on"); }
+function closeModal() { $("modal").classList.remove("on"); }
+window.closeModal = closeModal;
+$("modal").onclick = e => { if (e.target === $("modal")) closeModal(); };
+function toast(t) { $("job").innerHTML = `<b>${esc(t)}</b>`; setTimeout(renderJob, 4000); }
+
+// ======================= Review tab =======================
+let filter = localStorage.getItem("filter") || "needs-input";
+let cur = null, boxes = [], sel = -1, adding = false, hide = false, showFrigate = false;
+let view = { s: 1, tx: 0, ty: 0 }, dirty = false, saveTimer = null, busy = false;
+const TABS = [["needs-input", "Needs input"], ["ready", "Ready"], ["unreviewed", "Unreviewed"], ["submitted", "Submitted"], ["all", "All"]];
+
+function colorFor(label) { let h = 0; for (const c of label) h = (h * 31 + c.charCodeAt(0)) % 360; return `hsl(${h} 85% 55%)`; }
+
+function renderTabs() {
+  $("tabs").innerHTML = TABS.map(([k, name]) => {
+    const n = k === "all" ? runs.length : runs.filter(r => r.status === k).length;
+    return `<button class="${k === filter ? "active" : ""}" data-k="${k}">${name} ${n}</button>`;
+  }).join("");
+  $("tabs").querySelectorAll("button").forEach(b => b.onclick = () => {
+    filter = b.dataset.k; localStorage.setItem("filter", filter); renderTabs(); renderRunList();
+  });
+}
+function visibleRuns() { return filter === "all" ? runs : runs.filter(r => r.status === filter); }
+function renderRunList() {
+  const list = visibleRuns();
+  $("runs").innerHTML = list.length ? list.map(r => {
+    const what = Object.entries(r.labels).map(([l, n]) => `${n} ${l}`).join(", ") || "nothing found";
+    const badge = { "needs-input": plural(r.questions, "question"), ready: "ready", submitted: r.verifiedAt ? "verified" : "saved",
+      unreviewed: "unreviewed", "nothing-to-do": "nothing to do" }[r.status];
+    return `<div class="item ${cur && cur.run.imageId === r.id ? "sel" : ""}" data-id="${r.id}">
+      <div class="top"><span class="name">${esc(r.camera)}</span><span class="badge b-${r.status}">${badge}</span></div>
+      <div class="sub">${esc(what)}${r.locked ? ` · ${r.locked} verified kept` : ""}${r.humanEdited ? " · edited" : ""}</div>
+      <div class="sub">${esc(r.id)} · ${money(r.cost)}${r.submitError ? " · ⚠ submit failed" : ""}</div></div>`;
+  }).join("") : `<div class="empty">Nothing here.</div>`;
+  $("runs").querySelectorAll(".item").forEach(el => el.onclick = () => open(el.dataset.id));
+}
+
+async function open(id, keepView = false) {
+  if (dirty) await saveNow();
+  const data = await api(`/api/runs/${id}`);
+  const sameImage = cur && cur.run.imageId === id;
+  cur = data;
+  boxes = cur.run.objects.map(o => ({ label: o.label, x1: o.box.x1, y1: o.box.y1, x2: o.box.x2, y2: o.box.y2, difficult: o.difficult, note: o.note }));
+  sel = -1; adding = false; dirty = false;
+  $("emptyMsg").style.display = "none";
+  const img = $("img");
+  if (!sameImage) { img.src = `/api/runs/${id}/image`; await img.decode().catch(() => {}); }
+  const W = cur.run.imageWidth, H = cur.run.imageHeight;
+  img.width = W; img.height = H;
+  const svg = $("svg"); svg.setAttribute("width", W); svg.setAttribute("height", H); svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  $("labelSel").innerHTML = labelOptions();
+  if (!keepView || !sameImage) fit();
+  renderRunList(); renderSide(); draw(); setSaveState("");
+}
+
+function draw() {
+  if (!cur) return;
+  const svg = $("svg"), s = view.s, sw = 2 / s, hs = 9 / s, fs = 13 / s, W = cur.run.imageWidth, H = cur.run.imageHeight;
+  let out = "";
+  const rectOf = a => ({ x: a.x * W, y: a.y * H, w: a.w * W, h: a.h * H });
+  if (showFrigate)
+    for (const d of cur.run.original.falsePositives || []) {
+      const r = rectOf(d);
+      out += `<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" fill="none" stroke="#9aa" stroke-width="${sw}" stroke-dasharray="${6 / s} ${4 / s}"/>`
+        + `<text x="${r.x}" y="${r.y - 4 / s}" font-size="${fs}" fill="#bcc">frigate: ${esc(d.label)} ${(d.score * 100).toFixed(0)}%</text>`;
+    }
+  if (!hide) {
+    for (const a of cur.run.locked || []) {     // verified boxes: shown for context, not editable
+      const r = rectOf(a);
+      out += `<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" fill="none" stroke="#aab" stroke-opacity=".8" stroke-width="${sw}" pointer-events="none"/>`
+        + `<text x="${r.x + 2 / s}" y="${r.y + r.h - 4 / s}" font-size="${fs * .9}" fill="#ccd" pointer-events="none">✓ ${esc(a.label)}</text>`;
+    }
+    (cur.run.uncertain || []).forEach((u, i) => {
+      if (!u.region) return;
+      const r = u.region;
+      out += `<rect x="${r.x1}" y="${r.y1}" width="${r.x2 - r.x1}" height="${r.y2 - r.y1}" fill="rgba(255,40,40,.12)" stroke="#ff3b3b" stroke-width="${sw}" stroke-dasharray="${5 / s} ${3 / s}" pointer-events="none"/>`
+        + `<text x="${r.x2 + 3 / s}" y="${r.y1 + fs}" font-size="${fs * 1.1}" font-weight="700" fill="#ff5b5b" pointer-events="none">?${i + 1}</text>`;
+    });
+    boxes.forEach((b, i) => {
+      const c = colorFor(b.label), isSel = i === sel;
+      out += `<g data-i="${i}"><rect class="body" x="${b.x1}" y="${b.y1}" width="${b.x2 - b.x1}" height="${b.y2 - b.y1}" fill="${isSel ? "rgba(255,255,255,.08)" : "transparent"}"
+             stroke="${c}" stroke-width="${isSel ? sw * 1.6 : sw}" ${b.difficult ? `stroke-dasharray="${6 / s} ${3 / s}"` : ""} style="cursor:move"/>`;
+      const tag = `#${i + 1} ${b.label}${b.difficult ? " (d)" : ""}`, tw = tag.length * fs * 0.6 + 6 / s;
+      const ty = b.y1 - fs - 4 / s >= 0 ? b.y1 - fs - 4 / s : b.y2;
+      out += `<rect x="${b.x1}" y="${ty}" width="${tw}" height="${fs + 4 / s}" fill="${c}" opacity=".9" pointer-events="none"/>`
+        + `<text x="${b.x1 + 3 / s}" y="${ty + fs}" font-size="${fs}" fill="#000" pointer-events="none">${esc(tag)}</text>`;
+      if (isSel) for (const [hx, hy, k] of handles(b))
+        out += `<rect class="handle" data-h="${k}" x="${hx - hs / 2}" y="${hy - hs / 2}" width="${hs}" height="${hs}" fill="#fff" stroke="${c}" stroke-width="${sw}" style="cursor:${k}-resize"/>`;
+      out += `</g>`;
+    });
+  }
+  svg.innerHTML = out;
+  $("zoomPct").textContent = Math.round(view.s * 100) + "%";
+  $("delBtn").disabled = sel < 0; $("diffChk").disabled = sel < 0;
+  if (sel >= 0) { $("labelSel").value = boxes[sel].label; $("diffChk").checked = boxes[sel].difficult; }
+}
+function handles(b) {
+  const mx = (b.x1 + b.x2) / 2, my = (b.y1 + b.y2) / 2;
+  return [[b.x1, b.y1, "nw"], [mx, b.y1, "n"], [b.x2, b.y1, "ne"], [b.x2, my, "e"], [b.x2, b.y2, "se"], [mx, b.y2, "s"], [b.x1, b.y2, "sw"], [b.x1, my, "w"]];
+}
+function applyView() { $("canvas").style.transform = `translate(${view.tx}px, ${view.ty}px) scale(${view.s})`; draw(); }
+function fit() {
+  if (!cur || tab !== "review") return;
+  const r = $("viewport").getBoundingClientRect();
+  if (!r.width) return;
+  const s = Math.min(r.width / cur.run.imageWidth, r.height / cur.run.imageHeight) * 0.98;
+  view = { s, tx: (r.width - cur.run.imageWidth * s) / 2, ty: (r.height - cur.run.imageHeight * s) / 2 };
+  applyView();
+}
+function zoomAt(f, cx, cy) {
+  const s = Math.min(16, Math.max(0.1, view.s * f));
+  view.tx = cx - (cx - view.tx) * (s / view.s); view.ty = cy - (cy - view.ty) * (s / view.s); view.s = s; applyView();
+}
+function focusRegion(r) {
+  const v = $("viewport").getBoundingClientRect(), w = Math.max(r.x2 - r.x1, 60), h = Math.max(r.y2 - r.y1, 60);
+  const s = Math.min(8, Math.min(v.width / (w * 4), v.height / (h * 4)));
+  view = { s, tx: v.width / 2 - ((r.x1 + r.x2) / 2) * s, ty: v.height / 2 - ((r.y1 + r.y2) / 2) * s }; applyView();
+}
+
+const vp = $("viewport");
+let drag = null;
+function toImg(e) { const r = vp.getBoundingClientRect(); return { x: (e.clientX - r.left - view.tx) / view.s, y: (e.clientY - r.top - view.ty) / view.s }; }
+function clampBox(b) {
+  const W = cur.run.imageWidth, H = cur.run.imageHeight;
+  Object.assign(b, { x1: Math.max(0, Math.min(b.x1, b.x2)), x2: Math.min(W, Math.max(b.x1, b.x2)), y1: Math.max(0, Math.min(b.y1, b.y2)), y2: Math.min(H, Math.max(b.y1, b.y2)) });
+}
+vp.addEventListener("pointerdown", e => {
+  if (!cur || busy || e.button !== 0) return;
+  vp.setPointerCapture(e.pointerId);
+  const p = toImg(e), t = e.target, g = t.closest && t.closest("g[data-i]");
+  const locked = !!cur.run.submittedAt || !cur.run.allowedLabels.length;
+  if (adding && !locked) {
+    boxes.push({ label: $("labelSel").value, x1: p.x, y1: p.y, x2: p.x, y2: p.y, difficult: false, note: null });
+    sel = boxes.length - 1; drag = { kind: "resize", h: "se", start: p, orig: { ...boxes[sel] }, created: true };
+  } else if (t.classList && t.classList.contains("handle") && g) {
+    sel = +g.dataset.i; drag = { kind: "resize", h: t.dataset.h, start: p, orig: { ...boxes[sel] } };
+  } else if (g) {
+    sel = +g.dataset.i; drag = { kind: "move", start: p, orig: { ...boxes[sel] } }; renderBoxList();
+  } else {
+    drag = { kind: "pan", sx: e.clientX, sy: e.clientY, tx: view.tx, ty: view.ty, moved: false }; vp.classList.add("panning");
+  }
+  draw();
+});
+vp.addEventListener("pointermove", e => {
+  if (!drag) return;
+  if (drag.kind === "pan") {
+    const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
+    if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+    view.tx = drag.tx + dx; view.ty = drag.ty + dy; applyView(); return;
+  }
+  if (cur.run.submittedAt) return;
+  const p = toImg(e), b = boxes[sel], o = drag.orig, dx = p.x - drag.start.x, dy = p.y - drag.start.y;
+  if (drag.kind === "move") {
+    const w = o.x2 - o.x1, h = o.y2 - o.y1;
+    b.x1 = Math.max(0, Math.min(cur.run.imageWidth - w, o.x1 + dx)); b.y1 = Math.max(0, Math.min(cur.run.imageHeight - h, o.y1 + dy));
+    b.x2 = b.x1 + w; b.y2 = b.y1 + h;
+  } else {
+    if (drag.h.includes("w")) b.x1 = o.x1 + dx; if (drag.h.includes("e")) b.x2 = o.x2 + dx;
+    if (drag.h.includes("n")) b.y1 = o.y1 + dy; if (drag.h.includes("s")) b.y2 = o.y2 + dy;
+  }
+  draw();
+});
+vp.addEventListener("pointerup", () => {
+  if (!drag) return;
+  vp.classList.remove("panning");
+  if (drag.kind === "pan") { if (!drag.moved) { sel = -1; draw(); renderBoxList(); } }
+  else {
+    const b = boxes[sel]; clampBox(b);
+    if (drag.created && (b.x2 - b.x1 < 3 || b.y2 - b.y1 < 3)) { boxes.splice(sel, 1); sel = -1; }
+    else if (JSON.stringify(drag.orig) !== JSON.stringify(b)) changed();
+    if (drag.created) setAdding(false);
+    draw(); renderBoxList();
+  }
+  drag = null;
+});
+vp.addEventListener("wheel", e => {
+  if (!cur) return; e.preventDefault();
+  const r = vp.getBoundingClientRect(); zoomAt(Math.exp(-e.deltaY * 0.0015), e.clientX - r.left, e.clientY - r.top);
+}, { passive: false });
+function setAdding(on) { adding = on; $("addBtn").classList.toggle("active", on); vp.classList.toggle("adding", on); }
+
+function changed() {
+  if (cur.run.submittedAt) return;
+  dirty = true; setSaveState("Unsaved changes…"); clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 800);
+}
+async function saveNow() {
+  clearTimeout(saveTimer);
+  if (!dirty || !cur) return;
+  dirty = false;
+  try {
+    const res = await api(`/api/runs/${cur.run.imageId}/objects`, { method: "PUT", body: JSON.stringify({ objects: boxes }) });
+    cur.run = res.run; cur.status = res.status; setSaveState("Saved ✓"); refresh();
+  } catch (e) { dirty = true; setSaveState("Save failed: " + e.message); }
+}
+function setSaveState(t) { $("saveState").textContent = t; }
+function deleteSel() { if (sel < 0) return; boxes.splice(sel, 1); sel = -1; changed(); draw(); renderBoxList(); }
+function nudge(dx, dy, resize) {
+  if (sel < 0) return; const b = boxes[sel];
+  if (resize) { b.x2 += dx; b.y2 += dy; } else { b.x1 += dx; b.x2 += dx; b.y1 += dy; b.y2 += dy; }
+  clampBox(b); changed(); draw();
+}
+
+function renderSide() {
+  const r = cur.run, submitted = !!r.submittedAt, nothing = !r.allowedLabels.length;
+  const qs = r.uncertain || [], otherIssues = (r.issues || []).filter(i => !qs.some(q => q.description === i));
+  $("side").innerHTML = `
+    <div>
+      <div class="row" style="justify-content:space-between"><b>${esc(r.camera)}</b><span class="badge b-${cur.status}">${cur.status.replaceAll("-", " ")}</span></div>
+      <div class="meta">${esc(r.imageId)} · ${r.imageWidth}×${r.imageHeight} · cost ${money(r.costUsd)} · ${r.reviewRounds} review round(s)</div>
+      <div class="meta" style="margin-top:4px">Checked for all ${r.allowedLabels.length} labels on this camera.
+        ${r.verifiedLabels.length ? `${r.verifiedLabels.length} were verified before; Claude re-checked them and any change to them is listed as a question.` : "None were verified before."}</div>
+      ${(r.locked || []).length ? `<div class="meta">Grey ✓ boxes were kept as is (labeled by an older version).</div>` : ""}
+      ${r.notes ? `<div class="meta" style="margin-top:4px">${esc(r.notes)}</div>` : ""}
+      ${submitted ? `<div class="issue" style="color:var(--ok)">${r.verifiedAt ? "Saved and verified" : "Saved (not verified)"} ${new Date(r.submittedAt).toLocaleString()}</div>` : ""}
+      ${r.submitError ? `<div class="issue">Last submit failed: ${esc(r.submitError)}</div>` : ""}
+    </div>
+    ${qs.length || otherIssues.length ? `<div><h2>Claude's questions</h2>
+      ${qs.map((q, i) => `<div class="q" data-q="${i}">
+        <div class="qt" title="Show on image"><b>?${i + 1}</b> ${esc(q.description)}</div>
+        <textarea rows="2" placeholder="What is it? e.g. 'parked golf cart, ignore it' or 'a person, label it'" data-ans="${i}" ${submitted ? "disabled" : ""}></textarea>
+        <label><input type="checkbox" data-rem="${i}" ${submitted ? "disabled" : ""}> remember this for camera ${esc(r.camera)}</label></div>`).join("")}
+      ${otherIssues.map(i => `<div class="issue">⚠ ${esc(i)}</div>`).join("")}</div>` : ""}
+    ${nothing ? "" : `<div><h2>Describe what's wrong</h2>
+      <textarea id="fbText" rows="3" ${submitted ? "disabled" : ""} placeholder="e.g. '#3 is a mannequin, not a person' or 'the bin on the left is two bins' or 'you missed the cat under the car'"></textarea>
+      <div class="row" style="margin-top:6px"><button id="sendBtn" ${submitted ? "disabled" : ""}>Send to Claude <kbd>⌘↵</kbd></button></div>
+      ${(r.feedback || []).length ? `<details><summary>Earlier feedback (${r.feedback.length})</summary>${r.feedback.map(f => `<div class="history">${esc(f)}</div>`).join("")}</details>` : ""}
+    </div>
+    <div><h2>Boxes</h2><div id="boxList"></div></div>`}
+    <div><details><summary>Notes for camera ${esc(r.camera)}${cur.cameraNotes ? "" : " (none yet)"}</summary>
+      <div class="meta" style="margin:6px 0">Sent to Claude with every image from this camera. Use it for things that never change: parked vehicles, statues, what counts as a bin here.</div>
+      <textarea id="notesText" rows="5">${esc(cur.cameraNotes)}</textarea>
+      <div class="row" style="margin-top:6px"><button id="notesSave">Save notes</button></div></details></div>
+    <div class="actions">
+      <div id="msg"></div>
+      ${nothing ? `<div class="meta">Every label on this camera was already verified on this image; nothing to submit.</div>` : `
+      ${submitted && !r.verifiedAt
+        ? `<button class="primary" id="approveBtn">Verify on Frigate+</button><button id="saveOnlyBtn" disabled>Saved</button>`
+        : `<button class="primary" id="approveBtn" ${submitted ? "disabled" : ""}>${submitted ? "Saved and verified" : "Approve, save & verify on Frigate+"}</button>
+           <button id="saveOnlyBtn" ${submitted ? "disabled" : ""}>Save without verifying</button>`}
+      <div class="meta">Verify marks the ${toVerify(r).length} label(s) that weren't verified yet, like Verify &amp; Save in the Frigate+ editor.</div>`}
+    </div>`;
+  $("side").querySelectorAll(".qt").forEach(el => el.onclick = () => { const q = qs[+el.parentElement.dataset.q]; if (q.region) focusRegion(q.region); });
+  if ($("sendBtn")) {
+    $("sendBtn").onclick = sendFeedback;
+    $("fbText").addEventListener("keydown", e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) sendFeedback(); });
+  }
+  if ($("approveBtn")) { $("approveBtn").onclick = () => approve(false, true); $("saveOnlyBtn").onclick = () => approve(false, false); }
+  $("notesSave").onclick = saveNotes;
+  renderBoxList();
+}
+// Labels this run is filling in, then the ones already verified on the image (for fixing objects the
+// earlier verification missed, like a second car).
+function toVerify(r) { return r.allowedLabels.filter(l => !r.verifiedLabels.includes(l)); }
+
+function labelOptions(selected) {
+  const opt = l => `<option ${l === selected ? "selected" : ""}>${esc(l)}</option>`;
+  const v = (cur.run.verifiedLabels || []).filter(l => !cur.run.allowedLabels.includes(l));
+  return `<optgroup label="Labeling now">${cur.run.allowedLabels.map(opt).join("")}</optgroup>`
+    + (v.length ? `<optgroup label="Already verified on this image">${v.map(opt).join("")}</optgroup>` : "");
+}
+
+function renderBoxList() {
+  const el = $("boxList"); if (!el || !cur) return;
+  const dis = cur.run.submittedAt ? "disabled" : "";
+  el.innerHTML = boxes.length ? boxes.map((b, i) => `
+    <div class="boxrow ${i === sel ? "sel" : ""}" data-i="${i}">
+      <span class="id" style="color:${colorFor(b.label)}">#${i + 1}</span>
+      <select data-l="${i}" ${dis}>${labelOptions(b.label)}</select>
+      <label class="meta"><input type="checkbox" data-d="${i}" ${b.difficult ? "checked" : ""} ${dis}> d</label>
+      <button class="danger" data-x="${i}" title="Delete" ${dis}>✕</button>
+    </div>${b.note ? `<div class="note">${esc(b.note)}</div>` : ""}`).join("") : `<div class="meta">No boxes.</div>`;
+  el.querySelectorAll(".boxrow").forEach(row => row.onclick = e => {
+    if (e.target.closest("select,input,button")) return;
+    sel = +row.dataset.i; draw(); renderBoxList(); focusRegion(boxes[sel]);
+  });
+  el.querySelectorAll("select[data-l]").forEach(s => s.onchange = () => { boxes[+s.dataset.l].label = s.value; changed(); draw(); renderBoxList(); });
+  el.querySelectorAll("input[data-d]").forEach(c => c.onchange = () => { boxes[+c.dataset.d].difficult = c.checked; changed(); draw(); });
+  el.querySelectorAll("button[data-x]").forEach(b => b.onclick = () => { sel = +b.dataset.x; deleteSel(); });
+}
+function msg(text, kind = "") { const m = $("msg"); if (m) { m.textContent = text; m.className = kind; } }
+
+async function sendFeedback() {
+  const text = $("fbText").value.trim();
+  const answers = [...document.querySelectorAll("[data-ans]")].map(t => ({
+    question: cur.run.uncertain[+t.dataset.ans].description, answer: t.value.trim(),
+    remember: document.querySelector(`[data-rem="${t.dataset.ans}"]`).checked,
+  })).filter(a => a.answer);
+  if (!text && !answers.length) { msg("Write an answer or describe what's wrong first.", "err"); return; }
+  if (dirty) await saveNow();
+  busy = true; $("busy").classList.add("on");
+  try {
+    const res = await api(`/api/runs/${cur.run.imageId}/feedback`, { method: "POST", body: JSON.stringify({ text, answers }) });
+    cur.run = res.run; cur.status = res.status;
+    if (answers.some(a => a.remember)) cur.cameraNotes = (await api(`/api/cameras/${encodeURIComponent(cur.run.camera)}/notes`)).notes;
+    boxes = cur.run.objects.map(o => ({ label: o.label, x1: o.box.x1, y1: o.box.y1, x2: o.box.x2, y2: o.box.y2, difficult: o.difficult, note: o.note }));
+    sel = -1; renderSide(); draw();
+    msg(cur.run.uncertain.length ? "Updated. Claude still has questions." : "Updated. Check the boxes, then approve.", "ok");
+    refresh();
+  } catch (e) { msg("Claude couldn't apply that: " + e.message, "err"); }
+  finally { busy = false; $("busy").classList.remove("on"); }
+}
+async function approve(force, verify) {
+  if (dirty) await saveNow();
+  const open = cur.run.submittedAt ? 0 : (cur.run.uncertain || []).length;
+  if (!force && open && !confirm(`Claude still has ${open} open question(s) on this image. Submit anyway?`)) return;
+  $("approveBtn").disabled = $("saveOnlyBtn").disabled = true; msg("Submitting…");
+  try {
+    const res = await api(`/api/runs/${cur.run.imageId}/approve`, { method: "POST", body: JSON.stringify({ force, verify }) });
+    if (!res.ok) {
+      msg(res.message, "err"); $("approveBtn").disabled = $("saveOnlyBtn").disabled = false;
+      if (res.message.includes("changed since") && confirm(res.message + "\n\nOverwrite the boxes on Frigate+?")) return approve(true, verify);
+      return;
+    }
+    msg(res.message, "ok"); await refresh(); goNext(1, true);
+  } catch (e) { msg(e.message, "err"); $("approveBtn").disabled = $("saveOnlyBtn").disabled = false; }
+}
+async function saveNotes() {
+  const res = await api(`/api/cameras/${encodeURIComponent(cur.run.camera)}/notes`, { method: "PUT", body: JSON.stringify({ notes: $("notesText").value }) });
+  cur.cameraNotes = res.notes; msg("Camera notes saved. They apply to images labeled or revised from now on.", "ok");
+}
+function goNext(dir, afterApprove = false) {
+  const list = visibleRuns(); if (!list.length) return;
+  let i = cur ? list.findIndex(r => r.id === cur.run.imageId) : -1;
+  if (afterApprove && i < 0) i = -1;
+  const next = list[(i + dir + list.length) % list.length] || list[0];
+  if (next && (!cur || next.id !== cur.run.imageId)) open(next.id);
+}
+
+$("fit").onclick = fit;
+$("zoomIn").onclick = () => { const r = vp.getBoundingClientRect(); zoomAt(1.25, r.width / 2, r.height / 2); };
+$("zoomOut").onclick = () => { const r = vp.getBoundingClientRect(); zoomAt(0.8, r.width / 2, r.height / 2); };
+$("addBtn").onclick = () => setAdding(!adding);
+$("delBtn").onclick = deleteSel;
+$("labelSel").onchange = () => { if (sel >= 0) { boxes[sel].label = $("labelSel").value; changed(); draw(); renderBoxList(); } };
+$("diffChk").onchange = () => { if (sel >= 0) { boxes[sel].difficult = $("diffChk").checked; changed(); draw(); renderBoxList(); } };
+$("hideChk").onchange = () => { hide = $("hideChk").checked; draw(); };
+$("frigateChk").onchange = () => { showFrigate = $("frigateChk").checked; draw(); };
+
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && $("modal").classList.contains("on")) { closeModal(); return; }
+  if (tab !== "review" || !cur || busy || (e.target.closest && e.target.closest("textarea, input[type=text], select"))) return;
+  const step = e.shiftKey ? 10 : 1, k = e.key;
+  if (k === "a" || k === "A") setAdding(!adding);
+  else if (k === "Delete" || k === "Backspace") { e.preventDefault(); deleteSel(); }
+  else if (k === "d" || k === "D") { if (sel >= 0) { boxes[sel].difficult = !boxes[sel].difficult; changed(); draw(); renderBoxList(); } }
+  else if (k === "Escape") { setAdding(false); sel = -1; draw(); renderBoxList(); }
+  else if (k === "f" || k === "F") fit();
+  else if (k === "h" || k === "H") { hide = !hide; $("hideChk").checked = hide; draw(); }
+  else if (k === "j" || k === "J") goNext(1);
+  else if (k === "k" || k === "K") goNext(-1);
+  else if (k === "+" || k === "=") $("zoomIn").click();
+  else if (k === "-") $("zoomOut").click();
+  else if (k === "Tab" && boxes.length) { e.preventDefault(); sel = (sel + (e.shiftKey ? -1 : 1) + boxes.length) % boxes.length; draw(); renderBoxList(); }
+  else if (k.startsWith("Arrow") && sel >= 0) {
+    e.preventDefault();
+    const d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[k];
+    nudge(d[0], d[1], e.altKey);
+  }
+});
+window.addEventListener("resize", () => cur && fit());
+
+// ======================= Frigate+ sign-in =======================
+async function checkAuth() {
+  try {
+    const a = await api("/api/auth");
+    $("authBar").style.display = a.ok ? "none" : "";
+    if (!a.ok) $("authProblem").textContent = a.problem || "";
+  } catch { /* server unreachable: the status line already says so */ }
+}
+$("authSave").onclick = async () => {
+  const token = $("authToken").value.trim(); if (!token) return;
+  $("authSave").disabled = true;
+  try {
+    const a = await api("/api/auth", { method: "POST", body: JSON.stringify({ refreshToken: token }) });
+    $("authToken").value = "";
+    if (a.ok) { $("authBar").style.display = "none"; if (tab === "label") loadCameras(); }
+    else $("authProblem").textContent = a.problem;
+  } catch (e) { $("authProblem").textContent = e.message; }
+  finally { $("authSave").disabled = false; }
+};
+
+// ======================= start =======================
+checkAuth();
+setInterval(checkAuth, 120000);
+showTab(tab);
+refresh();
+setInterval(refresh, 3000);
+setInterval(() => { if (tab === "label") loadCameras(); }, 15000);   // camera counts fill in over time
+</script>
+</body>
+</html>

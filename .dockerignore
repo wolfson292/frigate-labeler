@@ -1,0 +1,10 @@
+**/bin/
+**/obj/
+**/runs/
+data/
+.git/
+.env
+*.env
+*.har
+*.md
+!src/FrigateLabeler/prompts/*.md

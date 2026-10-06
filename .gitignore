@@ -1,0 +1,21 @@
+# Build output
+bin/
+obj/
+.vs/
+.idea/
+.DS_Store
+
+# Your images and labeling results (Frigate+ images, overlays, Claude output)
+runs/
+data/
+
+# Secrets and personal config: never commit these
+.env
+*.env
+!.env.example
+auth.json
+config.json
+cameras/
+*.har
+*.pem
+*.key
