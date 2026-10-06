@@ -96,8 +96,10 @@ The `deploy/` folder has everything for a home server:
 - `.env.example`: the environment variables (`ANTHROPIC_API_KEY`, the first-start
   `FRIGATE_PLUS_REFRESH_TOKEN`, `SWAG_NETWORK`).
 
-With Portainer: **Stacks → Add stack → Repository**, this repo, compose path
-`deploy/docker-compose.yml`, and set the environment variables there. With plain Docker:
+With Portainer: build the image on the host first (Portainer's agent can't build), e.g.
+`docker build -t frigate-labeler:latest https://github.com/wolfson292/frigate-labeler.git#main`,
+then **Stacks → Add stack → Repository**, this repo, compose path `deploy/portainer-stack.yml`,
+and set the environment variables there. With plain Docker:
 `cd deploy && cp .env.example .env` (fill it in), then `docker compose up -d --build`.
 
 When the Frigate+ sign-in expires, the page shows a banner where you paste a new refresh token.

@@ -1,0 +1,35 @@
+# frigate-labeler behind SWAG, for Portainer: uses the image `frigate-labeler:latest` already
+# built on the host (Portainer's agent can't build images). Build/update the image on the host with
+#   docker build -t frigate-labeler:latest https://github.com/wolfson292/frigate-labeler.git#main
+# then redeploy the stack. (With plain Docker, use docker-compose.yml, which builds it for you.)
+#
+# Secrets come from environment variables: set them in Portainer's stack "Environment variables",
+# or in a .env file next to this file (ignored by git). Never put them in this file.
+#
+# No ports are published: SWAG reaches the app over the shared Docker network only.
+services:
+  frigate-labeler:
+    image: frigate-labeler:latest
+    pull_policy: never
+    container_name: frigate-labeler
+    restart: unless-stopped
+    environment:
+      FRIGATE_LABELER_BASE_PATH: ${FRIGATE_LABELER_BASE_PATH:-/frigate-labeler}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Only needed for the first start; afterwards it's kept in the config volume, and you can
+      # paste a new one on the web page when it expires.
+      FRIGATE_PLUS_REFRESH_TOKEN: ${FRIGATE_PLUS_REFRESH_TOKEN:-}
+    volumes:
+      - frigate-labeler-config:/config   # Frigate+ sign-in, camera notes
+      - frigate-labeler-data:/data       # images, overlays and labeling results
+    networks:
+      - swag
+
+volumes:
+  frigate-labeler-config:
+  frigate-labeler-data:
+
+networks:
+  swag:
+    external: true
+    name: ${SWAG_NETWORK:-swag_default}
