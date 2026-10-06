@@ -429,23 +429,27 @@ $("modal").onclick = e => { if (e.target === $("modal")) closeModal(); };
 function toast(t) { $("job").innerHTML = `<b>${esc(t)}</b>`; setTimeout(renderJob, 4000); }
 
 // ======================= Review tab =======================
-let filter = localStorage.getItem("filter") || "needs-input";
+// "todo" = everything waiting for you (questions first, as the server sorts them). It's the default,
+// so approving always moves on to the next waiting image, whether or not it has questions.
+let filter = localStorage.getItem("reviewFilter") || "todo";
 let cur = null, boxes = [], sel = -1, adding = false, hide = false, showFrigate = false;
 let view = { s: 1, tx: 0, ty: 0 }, dirty = false, saveTimer = null, busy = false;
-const TABS = [["needs-input", "Needs input"], ["ready", "Ready"], ["unreviewed", "Unreviewed"], ["submitted", "Submitted"], ["all", "All"]];
+const TABS = [["todo", "To review"], ["needs-input", "Needs input"], ["ready", "Ready"], ["submitted", "Submitted"], ["all", "All"]];
+const TODO = ["needs-input", "ready", "unreviewed"];
+const inTab = (r, k) => k === "all" || (k === "todo" ? TODO.includes(r.status) : r.status === k);
 
 function colorFor(label) { let h = 0; for (const c of label) h = (h * 31 + c.charCodeAt(0)) % 360; return `hsl(${h} 85% 55%)`; }
 
 function renderTabs() {
   $("tabs").innerHTML = TABS.map(([k, name]) => {
-    const n = k === "all" ? runs.length : runs.filter(r => r.status === k).length;
+    const n = runs.filter(r => inTab(r, k)).length;
     return `<button class="${k === filter ? "active" : ""}" data-k="${k}">${name} ${n}</button>`;
   }).join("");
   $("tabs").querySelectorAll("button").forEach(b => b.onclick = () => {
-    filter = b.dataset.k; localStorage.setItem("filter", filter); renderTabs(); renderRunList();
+    filter = b.dataset.k; localStorage.setItem("reviewFilter", filter); renderTabs(); renderRunList();
   });
 }
-function visibleRuns() { return filter === "all" ? runs : runs.filter(r => r.status === filter); }
+function visibleRuns() { return runs.filter(r => inTab(r, filter)); }
 function renderRunList() {
   const list = visibleRuns();
   $("runs").innerHTML = list.length ? list.map(r => {
@@ -744,7 +748,12 @@ async function saveNotes() {
   cur.cameraNotes = res.notes; msg("Camera notes saved. They apply to images labeled or revised from now on.", "ok");
 }
 function goNext(dir, afterApprove = false) {
-  const list = visibleRuns(); if (!list.length) return;
+  let list = visibleRuns();
+  // Approved the last one in a narrower tab: carry on with everything else that's waiting.
+  if (afterApprove && !list.length && filter !== "todo") {
+    filter = "todo"; localStorage.setItem("reviewFilter", filter); renderTabs(); renderRunList(); list = visibleRuns();
+  }
+  if (!list.length) { if (afterApprove) msg("All caught up. Nothing else is waiting for review.", "ok"); return; }
   let i = cur ? list.findIndex(r => r.id === cur.run.imageId) : -1;
   if (afterApprove && i < 0) i = -1;
   const next = list[(i + dir + list.length) % list.length] || list[0];
