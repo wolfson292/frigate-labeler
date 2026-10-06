@@ -238,7 +238,7 @@ async function refresh() {
     renderTabs(); renderRunList();
     if (cur) {
       const s = runs.find(r => r.id === cur.run.imageId);
-      if (s && s.status !== cur.status && !dirty && !busy) await open(cur.run.imageId, true);
+      if (s && s.status !== cur.status && !dirty && !saving && !busy) await open(cur.run.imageId, true);
     } else if (tab === "review" && runs.length) { const f = visibleRuns()[0]; if (f) open(f.id); }
   } catch (e) { $("job").textContent = "Lost connection to the labeler (" + e.message + ")"; }
 }
@@ -433,7 +433,7 @@ function toast(t) { $("job").innerHTML = `<b>${esc(t)}</b>`; setTimeout(renderJo
 // so approving always moves on to the next waiting image, whether or not it has questions.
 let filter = localStorage.getItem("reviewFilter") || "todo";
 let cur = null, boxes = [], sel = -1, adding = false, hide = false, showFrigate = false;
-let view = { s: 1, tx: 0, ty: 0 }, dirty = false, saveTimer = null, busy = false;
+let view = { s: 1, tx: 0, ty: 0 }, dirty = false, saveTimer = null, busy = false, saving = null;
 const TABS = [["todo", "To review"], ["needs-input", "Needs input"], ["ready", "Ready"], ["submitted", "Submitted"], ["all", "All"]];
 const TODO = ["needs-input", "ready", "unreviewed"];
 const inTab = (r, k) => k === "all" || (k === "todo" ? TODO.includes(r.status) : r.status === k);
@@ -465,11 +465,11 @@ function renderRunList() {
 }
 
 async function open(id, keepView = false) {
-  if (dirty) await saveNow();
+  await flushSave();
   const data = await api(`api/runs/${id}`);
   const sameImage = cur && cur.run.imageId === id;
   cur = data;
-  boxes = cur.run.objects.map(o => ({ label: o.label, x1: o.box.x1, y1: o.box.y1, x2: o.box.x2, y2: o.box.y2, difficult: o.difficult, note: o.note }));
+  boxes = toBoxes(cur.run);
   sel = -1; adding = false; dirty = false;
   $("emptyMsg").style.display = "none";
   const img = $("img");
@@ -612,14 +612,31 @@ function changed() {
   if (cur.run.submittedAt) return;
   dirty = true; setSaveState("Unsaved changes…"); clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 800);
 }
+// Saves hand edits. Anything that sends this image to the server (Send to Claude, Approve, switching
+// images) awaits flushSave() first, so a save still in flight can't be overtaken.
 async function saveNow() {
   clearTimeout(saveTimer);
+  if (saving) await saving;
   if (!dirty || !cur) return;
   dirty = false;
-  try {
-    const res = await api(`api/runs/${cur.run.imageId}/objects`, { method: "PUT", body: JSON.stringify({ objects: boxes }) });
-    cur.run = res.run; cur.status = res.status; setSaveState("Saved ✓"); refresh();
-  } catch (e) { dirty = true; setSaveState("Save failed: " + e.message); }
+  const id = cur.run.imageId;
+  saving = (async () => {
+    try {
+      const res = await api(`api/runs/${id}/objects`, { method: "PUT", body: JSON.stringify({ objects: boxes }) });
+      if (cur && cur.run.imageId === id) {
+        cur.run = res.run; cur.status = res.status;
+        // Re-take the server's copy of the boxes (it marks which ones are yours), unless editing continued.
+        if (!dirty) { boxes = toBoxes(cur.run); renderBoxList(); }
+      }
+      setSaveState("Saved ✓"); refresh();
+    } catch (e) { dirty = true; setSaveState("Save failed: " + e.message); }
+  })();
+  try { await saving; } finally { saving = null; }
+}
+async function flushSave() { if (dirty) await saveNow(); else if (saving) await saving; }
+function toBoxes(run) {
+  return run.objects.map(o => ({ label: o.label, x1: o.box.x1, y1: o.box.y1, x2: o.box.x2, y2: o.box.y2,
+    difficult: o.difficult, note: o.note, human: o.human }));
 }
 function setSaveState(t) { $("saveState").textContent = t; }
 function deleteSel() { if (sel < 0) return; boxes.splice(sel, 1); sel = -1; changed(); draw(); renderBoxList(); }
@@ -697,7 +714,7 @@ function renderBoxList() {
       <select data-l="${i}" ${dis}>${labelOptions(b.label)}</select>
       <label class="meta"><input type="checkbox" data-d="${i}" ${b.difficult ? "checked" : ""} ${dis}> d</label>
       <button class="danger" data-x="${i}" title="Delete" ${dis}>✕</button>
-    </div>${b.note ? `<div class="note">${esc(b.note)}</div>` : ""}`).join("") : `<div class="meta">No boxes.</div>`;
+    </div>${b.human ? `<div class="note">✎ yours: Claude won't change this box</div>` : ""}${b.note && !b.human ? `<div class="note">${esc(b.note)}</div>` : ""}`).join("") : `<div class="meta">No boxes.</div>`;
   el.querySelectorAll(".boxrow").forEach(row => row.onclick = e => {
     if (e.target.closest("select,input,button")) return;
     sel = +row.dataset.i; draw(); renderBoxList(); focusRegion(boxes[sel]);
@@ -715,13 +732,13 @@ async function sendFeedback() {
     remember: document.querySelector(`[data-rem="${t.dataset.ans}"]`).checked,
   })).filter(a => a.answer);
   if (!text && !answers.length) { msg("Write an answer or describe what's wrong first.", "err"); return; }
-  if (dirty) await saveNow();
+  await flushSave();
   busy = true; $("busy").classList.add("on");
   try {
     const res = await api(`api/runs/${cur.run.imageId}/feedback`, { method: "POST", body: JSON.stringify({ text, answers }) });
     cur.run = res.run; cur.status = res.status;
     if (answers.some(a => a.remember)) cur.cameraNotes = (await api(`api/cameras/${encodeURIComponent(cur.run.camera)}/notes`)).notes;
-    boxes = cur.run.objects.map(o => ({ label: o.label, x1: o.box.x1, y1: o.box.y1, x2: o.box.x2, y2: o.box.y2, difficult: o.difficult, note: o.note }));
+    boxes = toBoxes(cur.run);
     sel = -1; renderSide(); draw();
     msg(cur.run.uncertain.length ? "Updated. Claude still has questions." : "Updated. Check the boxes, then approve.", "ok");
     refresh();
@@ -729,7 +746,16 @@ async function sendFeedback() {
   finally { busy = false; $("busy").classList.remove("on"); }
 }
 async function approve(force, verify) {
-  if (dirty) await saveNow();
+  await flushSave();
+  // Answers typed but never sent would be lost; offer to send them first.
+  const typed = [...document.querySelectorAll("[data-ans]")].some(t => t.value.trim())
+    || (($("fbText") || {}).value || "").trim();
+  if (!force && typed && !cur.run.submittedAt) {
+    if (confirm("You wrote answers or corrections that haven't been sent to Claude yet. Send them first?\n\n" +
+                "OK = send to Claude (then approve when it's done)\nCancel = approve without them")) {
+      await sendFeedback(); return;
+    }
+  }
   const open = cur.run.submittedAt ? 0 : (cur.run.uncertain || []).length;
   if (!force && open && !confirm(`Claude still has ${open} open question(s) on this image. Submit anyway?`)) return;
   $("approveBtn").disabled = $("saveOnlyBtn").disabled = true; msg("Submitting…");

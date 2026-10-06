@@ -158,14 +158,19 @@ public sealed class ReviewServer(RunStore store, FrigateClient frigate, Func<Cla
         {
             if (store.Find(id) is not { } run) return Task.FromResult(Results.NotFound());
             if (run.SubmittedAt is not null) return Task.FromResult(Results.Conflict("Already submitted."));
-            var objects = req.Objects.Select(b => new LabeledObject
+            var objects = req.Objects.Select(b =>
             {
-                Label = b.Label,
-                Box = new PixelBox(b.X1, b.Y1, b.X2, b.Y2).ClampTo(run.ImageWidth, run.ImageHeight),
-                Difficult = b.Difficult,
-                Confidence = 1,
-                Refined = true,
-                Note = b.Note,
+                var box = new PixelBox(b.X1, b.Y1, b.X2, b.Y2).ClampTo(run.ImageWidth, run.ImageHeight);
+                // Unchanged boxes keep their origin; anything the person moved, resized, relabeled or
+                // drew is theirs, and Claude won't change it.
+                var same = run.Objects.FirstOrDefault(o => o.Label == b.Label && o.Difficult == b.Difficult
+                                                          && Math.Abs(o.Box.X1 - box.X1) < 0.5 && Math.Abs(o.Box.Y1 - box.Y1) < 0.5
+                                                          && Math.Abs(o.Box.X2 - box.X2) < 0.5 && Math.Abs(o.Box.Y2 - box.Y2) < 0.5);
+                return same ?? new LabeledObject
+                {
+                    Label = b.Label, Box = box, Difficult = b.Difficult, Confidence = 1, Refined = true,
+                    Note = b.Note, Human = true,
+                };
             }).Where(o => o.Box.Width >= 1 && o.Box.Height >= 1
                           && (run.AllowedLabels.Contains(o.Label) || run.VerifiedLabels.Contains(o.Label))).ToList();
             var updated = run with { Objects = objects, HumanEdited = true };
@@ -180,9 +185,12 @@ public sealed class ReviewServer(RunStore store, FrigateClient frigate, Func<Cla
             if (run.SubmittedAt is not null) return Results.Conflict("Already submitted.");
 
             var parts = new List<string>();
+            var answered = run.Answered.ToList();
             foreach (var a in req.Answers ?? [])
             {
                 if (string.IsNullOrWhiteSpace(a.Answer)) continue;
+                answered.Add(new UncertainRegion(a.Question,
+                    run.Uncertain.FirstOrDefault(u => u.Description == a.Question)?.Region));
                 parts.Add($"Q: {a.Question}\nA: {a.Answer.Trim()}");
                 if (a.Remember) CameraNotes.Append(run.Camera, $"{a.Question} → {a.Answer.Trim()}");
             }
@@ -193,7 +201,8 @@ public sealed class ReviewServer(RunStore store, FrigateClient frigate, Func<Cla
             try { labeler = _labeler ??= labelerFactory(); }
             catch (ConfigException ex) { return Results.BadRequest(ex.Message); }
 
-            var updated = await labeler.ReviseAsync(run, await OriginalAsync(run, rct), string.Join("\n\n", parts), rct);
+            var updated = await labeler.ReviseAsync(run with { Answered = answered }, await OriginalAsync(run, rct),
+                string.Join("\n\n", parts), rct);
             store.Save(updated);
             Console.WriteLine($"  review page: revised {run.Camera}/{run.ImageId} (${updated.CostUsd - run.CostUsd:F3})");
             return Results.Ok(new { run = updated, status = Status(updated) });

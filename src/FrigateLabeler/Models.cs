@@ -73,6 +73,8 @@ public sealed record LabeledObject
     public double Confidence { get; init; }
     public string? Note { get; init; }
     public bool Refined { get; init; }
+    /// <summary>Drawn or adjusted by a person on the review page. Claude never moves, relabels or deletes these.</summary>
+    public bool Human { get; init; }
 }
 
 public sealed record UncertainRegion(string Description, PixelBox? Region);
@@ -128,6 +130,8 @@ public sealed record LabelRun
     public string? SubmitError { get; init; }
     /// <summary>True once a person has edited boxes on the review page.</summary>
     public bool HumanEdited { get; init; }
+    /// <summary>Questions the person has answered. Nothing at the same spot is asked again.</summary>
+    public List<UncertainRegion> Answered { get; init; } = [];
     /// <summary>Corrections and answers the person gave on the review page, oldest first.</summary>
     public List<string> Feedback { get; init; } = [];
     public long InputTokens { get; set; }

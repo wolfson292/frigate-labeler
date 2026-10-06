@@ -125,6 +125,10 @@ public sealed class ClaudeLabeler(AnthropicClient client, LabelerOptions options
             uncertain.AddRange(VerifiedChanges(run.Original.Annotations, run.VerifiedLabels, objects, bitmap.Width,
                 bitmap.Height, allFeedback));
 
+        // Never ask again about something the person already answered (same wording or same spot).
+        uncertain.RemoveAll(u => run.Answered.Any(a => a.Description == u.Description
+            || (a.Region is not null && u.Region is not null && a.Region.IoU(u.Region) > 0.3)));
+
         return run with
         {
             Objects = objects,
@@ -465,7 +469,8 @@ public sealed class ClaudeLabeler(AnthropicClient client, LabelerOptions options
         var boxList = objects.Count == 0
             ? "(no boxes)"
             : string.Join("\n", objects.Select((o, i) =>
-                $"#{i + 1} {o.Label}{(o.Difficult ? " (difficult)" : "")} at [{o.Box.X1:F0}, {o.Box.Y1:F0}, {o.Box.X2:F0}, {o.Box.Y2:F0}] in original-image pixels"));
+                $"#{i + 1} {o.Label}{(o.Difficult ? " (difficult)" : "")} at [{o.Box.X1:F0}, {o.Box.Y1:F0}, {o.Box.X2:F0}, {o.Box.Y2:F0}] in original-image pixels" +
+                (o.Human ? " — drawn by the person: always `keep`; mention any concern in `uncertain`" : "")));
 
         var viewList = string.Join("\n", views.Select((v, i) => i == 0
             ? $"View 1: the whole image, {v.Width} x {v.Height} px."
@@ -611,9 +616,10 @@ public sealed class ClaudeLabeler(AnthropicClient client, LabelerOptions options
         for (var i = 0; i < objects.Count; i++)
         {
             var obj = objects[i];
-            if (!verdicts.TryGetValue(i + 1, out var v))
+            // Not mentioned, or drawn/adjusted by the person: leave exactly as is.
+            if (obj.Human || !verdicts.TryGetValue(i + 1, out var v))
             {
-                kept.Add(obj);   // not mentioned: leave as is
+                kept.Add(obj);
                 continue;
             }
 
